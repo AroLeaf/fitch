@@ -35,7 +35,7 @@ int accept(TokenList *tokens, Symbol expected) {
 int expect(TokenList *tokens, Symbol expected) {
   if (accept(tokens, expected))
     return 1;
-  fprintf(stderr, "Wrong token type %d at token %s, position %d/%d, expected %d, previous %s\n", current(tokens).type, current(tokens).value, tokens->current, tokens->count, expected, previous(tokens).value);
+  fprintf(stderr, "Wrong token type %d at token %s, token %d/%d, expected %d, previous %s\n", current(tokens).type, current(tokens).value, tokens->current, tokens->count, expected, previous(tokens).value);
   exit(-1);
 }
 
@@ -45,56 +45,71 @@ void appendChild(Node *parent, Node child) {
   parent->children[parent->childCount - 1] = child;
 }
 
+
+Node newNode(Expression expr, Token token) {
+  return (Node){ expr, 0, malloc(0), 0, token.row, token.col, 0 };
+}
 Node tokenToNode(Expression expr, Token token) {
-  Node this = { expr, malloc(strlen(token.value) + 1), malloc(0), 0 };
+  Node this = newNode(expr, token);
+  this.value = malloc(strlen(token.value) + 1);
   strcpy(this.value, token.value);
-  this.value[strlen(token.value)] = 0;
   return this;
 }
 
 Node declaration(TokenList *tokens) {
   Node this = tokenToNode(expr_declaration, current(tokens));
-  if (accept(tokens, tok_constant) || expect(tokens, tok_predicate)) {
-    expect(tokens, tok_identifier);
-    appendChild(&this, tokenToNode(expr_identifier, previous(tokens)));
+  Expression expr;
+  if (accept(tokens, tok_constant)) {
+    expr = expr_constant;
+  } else if (accept(tokens, tok_function)) {
+    expr = expr_function;
+  } else {
+    expect(tokens, tok_predicate);
+    expr = expr_predicate;
   }
+  expect(tokens, tok_identifier);
+  appendChild(&this, tokenToNode(expr, previous(tokens)));
   while (accept(tokens, tok_separator)) {
     expect(tokens, tok_identifier);
-    appendChild(&this, tokenToNode(expr_identifier, previous(tokens)));
+    appendChild(&this, tokenToNode(expr, previous(tokens)));
   }
   return this;
 }
 
 Node expression(TokenList *tokens);
 
-Node term(TokenList *tokens) {
-  if (accept(tokens, tok_negation)) {
-    Node this = (Node){ expr_negation, 0, malloc(0), 0 };
-    appendChild(&this, term(tokens));
-    return this;
+Node factor(TokenList *tokens) {
+  expect(tokens, tok_identifier);
+  Node this = tokenToNode(expr_identifier, previous(tokens));
+  if (accept(tokens, tok_lparen)) {
+    this.type = expr_function;
+    appendChild(&this, factor(tokens));
+    while (accept(tokens, tok_separator)) {
+      appendChild(&this, factor(tokens));
+    }
+    expect(tokens, tok_rparen);
   }
+  return this;
+}
+
+Node term(TokenList *tokens) {
   Node this;
-  if (accept(tokens, tok_identifier)) {
-    this = tokenToNode(expr_identifier, previous(tokens));
+  if (accept(tokens, tok_negation)) {
+    this = tokenToNode(expr_negation, previous(tokens));
+    appendChild(&this, term(tokens));
+  } else if (accept(tokens, tok_lparen)) {
+    this = expression(tokens);
+    expect(tokens, tok_lparen);
+  } else {
+    this = factor(tokens);
     if (accept(tokens, tok_identity)) {
       Node left = this;
       this = tokenToNode(expr_identity, previous(tokens));
       appendChild(&this, left);
-      expect(tokens, tok_identifier);
-      appendChild(&this, tokenToNode(expr_identifier, previous(tokens)));
-    } else if (accept(tokens, tok_lparen)) {
-      expect(tokens, tok_identifier);
-      appendChild(&this, tokenToNode(expr_identifier, previous(tokens)));
-      while (accept(tokens, tok_separator)) {
-        expect(tokens, tok_identifier);
-        appendChild(&this, tokenToNode(expr_identifier, previous(tokens)));
-      }
-      expect(tokens, tok_rparen);
+      appendChild(&this, factor(tokens));
+    } else {
+      this.type = expr_predicate;
     }
-  } else {
-    expect(tokens, tok_lparen);
-    this = expression(tokens);
-    expect(tokens, tok_lparen);
   }
   return this;
 }
@@ -114,7 +129,7 @@ Node quantifier(TokenList *tokens) {
     return term(tokens);
   }
   expect(tokens, tok_identifier);
-  appendChild(&this, tokenToNode(expr_identifier, previous(tokens)));
+  appendChild(&this, tokenToNode(expr_variable, previous(tokens)));
   appendChild(&this, quantifier(tokens));
   return this;
 }
@@ -152,8 +167,8 @@ Node expression(TokenList *tokens) {
 }
 
 Node premise(TokenList *tokens) {
-  if (accept(tokens, tok_break)) {
-    return (Node){ expr_empty, 0, 0, 0 };
+  if (assert(tokens, tok_break)) {
+    return tokenToNode(expr_empty, current(tokens));
   }
   Node this = expression(tokens);
   return this;
@@ -173,22 +188,37 @@ Node concludable(TokenList *tokens) {
   ) return tokenToNode(expr_literal, previous(tokens));
 }
 
-Node references(TokenList *tokens) {
-  Node this = { expr_reference, 0, malloc(0), 0};
-  expect(tokens, tok_lparen);
+Node reference(TokenList *tokens) {
+  Node this = newNode(expr_reference, current(tokens));
   expect(tokens, tok_number);
   appendChild(&this, tokenToNode(expr_number, previous(tokens)));
-  while (accept(tokens, tok_separator)) {
+  if (accept(tokens, tok_colon)) {
     expect(tokens, tok_number);
     appendChild(&this, tokenToNode(expr_number, previous(tokens)));
+  }
+  if (accept(tokens, tok_elimination)) {
+    Node left = this;
+    this = tokenToNode(expr_reference_range, previous(tokens));
+    appendChild(&this, left);
+    appendChild(&this, reference(tokens));
+  }
+  return this;
+}
+
+Node referenceList(TokenList *tokens) {
+  Node this = tokenToNode(expr_reference_list, current(tokens));
+  expect(tokens, tok_lparen);
+  appendChild(&this, reference(tokens));
+  while (accept(tokens, tok_separator)) {
+    appendChild(&this, reference(tokens));
   }
   expect(tokens, tok_rparen);
   return this;
 }
 
 Node conclusion(TokenList *tokens) {
-  if (accept(tokens, tok_break)) {
-    return (Node){ expr_empty, 0, 0, 0 };
+  if (assert(tokens, tok_break)) {
+    return tokenToNode(expr_empty, current(tokens));
   }
   Node this;
   if (accept(tokens, tok_introduction)) {
@@ -201,21 +231,30 @@ Node conclusion(TokenList *tokens) {
     expect(tokens, tok_reiteration);
     this = tokenToNode(expr_reiteration, previous(tokens));
   }
-  appendChild(&this, references(tokens));
+  appendChild(&this, referenceList(tokens));
   appendChild(&this, premise(tokens));
   return this;
 }
 
 Node proof(TokenList *tokens) {
-  Node this = { expr_proof, 0, malloc(0), 0 };
-  Node premises = { expr_premises, 0, malloc(0), 0 };
-  Node conclusions = { expr_conclusions, 0, malloc(0), 0 };
+  Node this = newNode(expr_proof, current(tokens));
+  if (accept(tokens, tok_lsquare)) {
+    Node var = tokenToNode(expr_declaration, previous(tokens));
+    expect(tokens, tok_identifier);
+    appendChild(&var, tokenToNode(expr_variable, previous(tokens)));
+    expect(tokens, tok_rsquare);
+    appendChild(&this, var);
+  }
+  
+  Node premises = newNode(expr_premises, current(tokens));
   while (!assert(tokens, tok_proof)) {
     appendChild(&premises, premise(tokens));
     expect(tokens, tok_break);
   }
   expect(tokens, tok_proof);
   expect(tokens, tok_break);
+  
+  Node conclusions = newNode(expr_conclusions, current(tokens));
   while (!(assert(tokens, tok_undent) || assert(tokens, tok_none))) {
     if (accept(tokens, tok_indent)) {
       appendChild(&conclusions, proof(tokens));
@@ -231,7 +270,7 @@ Node proof(TokenList *tokens) {
 }
 
 Node fitch(TokenList *tokens) {
-  Node this = { expr_fitch, 0, malloc(0), 0 };
+  Node this = newNode(expr_fitch, current(tokens));
   while (assert(tokens, tok_predicate) || assert(tokens, tok_constant)) {
     appendChild(&this, declaration(tokens));
     expect(tokens, tok_break);
@@ -251,10 +290,53 @@ Node parser(TokenList tokens) {
 
 
 void printNodeToJSON(Node node) {
-  printf("{\"type\":%d,\"value\":\"%s\",\"children\":[", node.type, node.value);
+  printf("{\"type\":%d,\"value\":", node.type);
+  printJSONString(node.value);
+  printf(",\"row\":%d,\"col\":%d,\"valid\":%s,\"children\":[", node.row, node.col, node.valid ? "true": "false");
   for (int i = 0; i < node.childCount; i++) {
     printNodeToJSON(node.children[i]);
     if (i + 1 < node.childCount) putchar(',');
   }
   printf("]}");
+}
+
+void printJSONString(char *string) {
+  if (!string) return fputs("null", stdout);
+  fputs("\"", stdout);
+  int len = strlen(string);
+  for (int i = 0; i < len; i++) {
+    switch (string[i]) {
+      case '\b':
+        fputs("\\b", stdout);
+        break;
+
+      case '\f':
+        fputs("\\f", stdout);
+        break;
+
+      case '\n':
+        fputs("\\n", stdout);
+        break;
+
+      case '\r':
+        fputs("\\r", stdout);
+        break;
+
+      case '\t':
+        fputs("\\t", stdout);
+        break;
+
+      case '"':
+        fputs("\\\"", stdout);
+        break;
+
+      case '\\':
+        fputs("\\\\", stdout);
+        break;
+      
+      default:
+        putchar(string[i]);
+    }
+  }
+  fputs("\"", stdout);
 }

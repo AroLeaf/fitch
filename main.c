@@ -43,33 +43,36 @@ static error_t parse_opt (int key, char *arg, struct argp_state *state) {
 
 static char args_doc[] = "input";
 
-static char doc[] = "A program to parse and validate fitch proofs written in a custom, easy-to-type format.";
+static char doc[] = "A program to parse and validate fitch proofs written in a custom, easy to type format.";
 
 static struct argp argp = {options, parse_opt, args_doc, doc};
 
 int main(int argc, char *argv[]) {
   struct arguments arguments;
-  
   arguments.args[0] = "";
   arguments.json = 0;
 
-  argp_parse (&argp, argc, argv, 0, 0, &arguments);
-
+  argp_parse(&argp, argc, argv, 0, 0, &arguments);
 
   FILE *instream;
-  
   if (isatty(fileno(stdin))) {
     instream = fopen(arguments.args[0], "r");
   } else {
     instream = stdin;
   }
-
   if (!instream) {
     fprintf(stderr, "Error! file `%s` doesn't exist.\n", arguments.args[0]);
     exit(-1);
   }
 
   TokenList tokens = lexer(instream);
+
+  // puts("\n");
+  // for (int i = 0; i < tokens.count; i++) {
+  //   printf("%s", tokens.tokens[i].value);
+  // }
+  // puts("\n");
+
   Node tree = parser(tokens);
 
   printNodeToJSON(tree);

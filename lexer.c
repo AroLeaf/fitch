@@ -36,6 +36,12 @@ char expectChar(FILE *stream, Info *info, char expected) {
   return nextChar(stream, info);
 }
 
+void pushToken(TokenList *tokens, Token token) {
+  tokens->count++;
+  tokens->tokens = realloc(tokens->tokens, tokens->count * sizeof(Token));
+  tokens->tokens[tokens->count-1] = token;
+}
+
 char *appendChar(char *s, char c) {
   int len = strlen(s);
   char *out = realloc(s, len + 2);
@@ -79,14 +85,18 @@ TokenList lexer(FILE *stream) {
     
     if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
       do {
-          value = appendChar(value, c);
-          c = nextChar(stream, &info);
-        } while ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'));
-        type = !strcmp(value, "pred")
-          ? tok_predicate
-          : !strcmp(value, "const")
-            ? tok_constant
-            : tok_identifier;
+        value = appendChar(value, c);
+        c = nextChar(stream, &info);
+      } while ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'));
+      if (!strcmp(value, "pred")) {
+        type = tok_predicate;
+      } else if (!strcmp(value, "const")) {
+        type = tok_constant;
+      } else if (!strcmp(value, "func")) {
+        type = tok_function;
+      } else {
+        type = tok_identifier;
+      }
     } else if (c >= '1' && c <= '9') {
       type = tok_number;
         do {
@@ -95,10 +105,27 @@ TokenList lexer(FILE *stream) {
         } while (c >= '0' && c <= '9');
     } else {
       switch (c) {
+        case '/':
+          if ((c = expectChar(stream, &info, '/'))) {
+            while (c != '\n' && c != EOF) {
+              c = nextChar(stream, &info);
+            }
+          } else if ((c = expectChar(stream, &info, '*'))) {
+            // c = nextChar(stream, &info);
+            while (!(expectChar(stream, &info, '*') && (c = expectChar(stream, &info, '/'))) && c != EOF) {
+              c = nextChar(stream, &info);
+            }
+          } else {
+            fprintf(stderr, "Invalid character `%c` at %d:%d", c, info.row, info.col);
+            exit(-1);
+          }
+          c = nextChar(stream, &info);
+          continue;
+
         case '<':
           type = tok_biconditional;
           if (!expectChar(stream, &info, '-') || !expectChar(stream, &info, '>')) {
-            fprintf(stderr, "Invalid character at %d:%d", info.row, info.col);
+            fprintf(stderr, "Invalid character `%c` at %d:%d", c, info.row, info.col);
             exit(-1);
           };
           c = nextChar(stream, &info);
@@ -174,6 +201,12 @@ TokenList lexer(FILE *stream) {
           c = nextChar(stream, &info);
           break;
 
+        case ':':
+          type = tok_colon;
+          value = setString(value, ":");
+          c = nextChar(stream, &info);
+          break;
+
         case '(':
           type = tok_lparen;
           value = setString(value, "(");
@@ -186,6 +219,18 @@ TokenList lexer(FILE *stream) {
           c = nextChar(stream, &info);
           break;
 
+        case '[':
+          type = tok_lsquare;
+          value = setString(value, "[");
+          c = nextChar(stream, &info);
+          break;
+
+        case ']':
+          type = tok_rsquare;
+          value = setString(value, "]");
+          c = nextChar(stream, &info);
+          break;
+
         case '\n':
           if (peek(stream) != ' ') {
             int pushed = matchIndent(&indentation, 0, &type);
@@ -194,11 +239,7 @@ TokenList lexer(FILE *stream) {
               exit(-1);
             }
             for (int i = 0; i < pushed; i++) {
-              tokens.count++;
-              tokens.tokens = realloc(tokens.tokens, tokens.count * sizeof(Token));
-              Token token = { type, 0, row, col };
-              token.value = strcpy(malloc(strlen(value) + 1), value);
-              tokens.tokens[tokens.count-1] = token;
+              pushToken(&tokens, (Token){ type, strcpy(malloc(strlen(value) + 1), value), row, col });
             }
           }
         case ';':
@@ -220,27 +261,19 @@ TokenList lexer(FILE *stream) {
               exit(-1);
             }
             for (int i = 0; i < pushed; i++) {
-              tokens.count++;
-              tokens.tokens = realloc(tokens.tokens, tokens.count * sizeof(Token));
-              Token token = { type, 0, row, col };
-              token.value = strcpy(malloc(strlen(value) + 1), value);
-              tokens.tokens[tokens.count-1] = token;
+              pushToken(&tokens, (Token){ type, strcpy(malloc(strlen(value) + 1), value), row, col });
             }
           }
           free(value);
           continue;
 
         default:
-          fprintf(stderr, "`%c` is not a valid character at %d:%d\n", c, row, col);
+          fprintf(stderr, "Invalid character `%c` at %d:%d\n", c, row, col);
           exit(-1);
       }
     }
 
-    tokens.count++;
-    tokens.tokens = realloc(tokens.tokens, tokens.count * sizeof(Token));
-    Token token = { type, 0, row, col };
-    token.value = strcpy(malloc(strlen(value) + 1), value);
-    tokens.tokens[tokens.count-1] = token;
+    pushToken(&tokens, (Token){ type, strcpy(malloc(strlen(value) + 1), value), row, col });
     free(value);
   }
 

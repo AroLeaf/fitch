@@ -1,7 +1,8 @@
+#include <stdio.h>
 #ifndef LEXER_H
 #define LEXER_H
 
-typedef enum { tok_none, tok_constant, tok_predicate, tok_identifier, tok_number, tok_separator, tok_identity, tok_conjunction, tok_disjunction, tok_negation, tok_elimination, tok_introduction, tok_reiteration, tok_conditional, tok_biconditional, tok_contradiction, tok_forall, tok_exists, tok_proof, tok_lparen, tok_rparen, tok_indent, tok_undent, tok_break } Symbol;
+typedef enum { tok_none, tok_predicate, tok_function, tok_constant, tok_identifier, tok_number, tok_separator, tok_colon, tok_identity, tok_conjunction, tok_disjunction, tok_negation, tok_elimination, tok_introduction, tok_reiteration, tok_conditional, tok_biconditional, tok_contradiction, tok_forall, tok_exists, tok_proof, tok_lparen, tok_rparen, tok_lsquare, tok_rsquare, tok_indent, tok_undent, tok_break } Symbol;
 
 typedef struct Token {
   Symbol type;
